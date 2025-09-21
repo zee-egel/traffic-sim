@@ -1,0 +1,7 @@
+[project]
+name = "traffic-sim"
+version = "0.1.0"
+description = "Small traffic simulation prototype"
+requires-python = ">=3.10"
+authors = [{ name = "Traffic Sim" }]
+readme = "README.md"
