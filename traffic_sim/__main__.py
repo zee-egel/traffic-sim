@@ -32,18 +32,28 @@ def road_tiles(grid: List[List[str]]):
                 coords.append((r,c))
     return coords
 
-def spawn_fn(now_s: float, world: World):
+import random
+# ...
+
+CAR_KINDS = [
+    "police","taxi","sports_blue","van",
+    "sports_yellow","ambulance","sedan_red","motor_blue","motor_red"
+]
+
+def simple_spawn(now_s: float, world: World):
     spawned = []
-    if random.random() < 0.25:  # spawn rate
-        tiles = road_tiles(GRID)
-        start = random.choice([t for t in tiles if t[1] == 0 or t[1] == len(GRID[0])-1 or t[0] in (0, len(GRID)-1)])
-        goal  = random.choice([t for t in tiles if t != start])
-        # Vehicle will get routed inside grid_world.advance_routing / bfs
-        # For first edge, pick any road out of start → world.grid builder already created them
-        # We’ll create vehicle by hand on a departing road:
-        # (We’ll let the first road selection be done via route computed in grid_world.spawn_vehicle if you adopt that.)
-        # For the quick demo, we’ll just attach a route later. Keeping simple:
-        pass
+    if random.random() < 0.15:
+        left_edge_roads = [r for r in world.roads if getattr(r, "from_tile", (0,0))[1] == 0]
+        if left_edge_roads:
+            rd = random.choice(left_edge_roads)
+            kind = random.choice(CAR_KINDS)
+            vid = len(world.vehicles) + 1
+            car = Vehicle(id=vid, road=rd, pos_m=0.0, enter_time_s=now_s,
+                          kind=kind, sprite_key=kind)
+            # optional: color diversity by slight speed jitter
+            car.target_speed *= random.uniform(0.9, 1.1)
+            world.vehicles.append(car)
+            spawned.append(car)
     return spawned
 
 if __name__ == "__main__":
