@@ -23,10 +23,14 @@ class World:
     def add_vehicle(self, vehicle) -> None:
         self.vehicles.append(vehicle)
 
-    def tick(self, dt: float) -> None:
-        if not self.intersections:
-            return
-        intersection = self.intersections[0]
-        for vehicle in self.vehicles:
-            vehicle.update(dt, intersection)
+    from .grid_world import advance_routing
+
+    def tick(self, dt: float):
+        inter = self.intersections[0] if self.intersections else None
+        for car in list(self.vehicles):
+            car.update(dt, inter)  # still using single signal; we’ll expand next
+        try:
+            advance_routing(self)
+        except Exception:
+            pass
 
