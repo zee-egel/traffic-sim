@@ -1,28 +1,19 @@
-"""Simple metrics collectors for the simulation."""
-from __future__ import annotations
-
 from dataclasses import dataclass, field
-from statistics import mean
-
+from typing import List, Dict
 
 @dataclass
 class Metrics:
+    completed_times: List[float] = field(default_factory=list)
     entered: int = 0
     exited: int = 0
-    completed_times: list[float] = field(default_factory=list)
 
-    def on_enter(self) -> None:
+    def on_enter(self):
         self.entered += 1
 
-    def on_exit(self, now_s: float, vehicle) -> None:
+    def on_exit(self, t: float, car):
         self.exited += 1
-        travel_time = now_s - vehicle.enter_time_s
-        self.completed_times.append(travel_time)
+        self.completed_times.append(max(0.0, t - car.enter_time_s))
 
-    def summary(self) -> dict:
-        avg = mean(self.completed_times) if self.completed_times else 0.0
-        return {
-            "entered": self.entered,
-            "exited": self.exited,
-            "avg_travel_time_s": round(avg, 2),
-        }
+    def summary(self) -> Dict[str, float]:
+        avg = sum(self.completed_times)/len(self.completed_times) if self.completed_times else 0.0
+        return {"entered": self.entered, "exited": self.exited, "avg_travel_time_s": round(avg, 2)}

@@ -1,27 +1,17 @@
-"""Time management helpers for the traffic simulation."""
-from __future__ import annotations
-
 from dataclasses import dataclass
-
 
 @dataclass(frozen=True)
 class TimeStep:
-    """Immutable container describing the fixed step size."""
-
-    dt: float
-
+    dt: float  # seconds
 
 class SimClock:
-    """Simple fixed-step simulation clock."""
+    def __init__(self, dt: float = 1.0):
+        self.t = 0.0
+        self.step = TimeStep(dt)
 
-    def __init__(self, dt: float = 1.0) -> None:
-        self.step = TimeStep(dt=dt)
-        self._t = 0.0
-
-    def tick(self) -> None:
-        """Advance the clock by one time step."""
-        self._t += self.step.dt
+    def tick(self):
+        self.t += self.step.dt
+        return self.step
 
     def now(self) -> float:
-        """Return the current simulation time in seconds."""
-        return self._t
+        return self.t

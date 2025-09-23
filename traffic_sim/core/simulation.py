@@ -1,11 +1,9 @@
 """Main simulation loop implementation."""
 from __future__ import annotations
-
 from typing import Callable, Optional
 
 from .timekeeper import SimClock
 from ..metrics.collectors import Metrics
-
 
 class Simulation:
     """Coordinates the policy, world state, spawning, and rendering."""
@@ -15,7 +13,7 @@ class Simulation:
         world,
         policy,
         spawn_fn: Callable[[float, object], list] | None,
-        render_fn: Optional[Callable[[object], str]] = None,
+        render_fn: Optional[Callable[..., str]] = None,
         dt: float = 1.0,
         max_time: float = 120.0,
         clock: Optional[SimClock] = None,
@@ -32,26 +30,34 @@ class Simulation:
     def run(self) -> dict:
         if not self.world.intersections:
             raise ValueError("World must contain at least one intersection")
-        intersection = self.world.intersections[0]
 
         while self.clock.now() <= self.max_time:
             now_s = self.clock.now()
 
-            intersection.apply_policy(self.policy, now_s)
+            # Apply signal policy at every node (supports phase offsets per node)
+            for inter in self.world.intersections:
+                inter.apply_policy(self.policy, now_s)
 
+            # Spawn vehicles
             new_cars = self.spawn_fn(now_s, self.world) or []
             for _ in new_cars:
                 self.metrics.on_enter()
 
+            # Advance world state
             self.world.tick(self.dt)
 
-            for vehicle in self.world.vehicles:
+            # Record exits
+            for vehicle in list(self.world.vehicles):
                 if vehicle.finished and vehicle.exit_time_s == 0.0:
                     vehicle.exit_time_s = now_s
                     self.metrics.on_exit(now_s, vehicle)
 
+            # Optional render (accepts (world, summary) or just (world))
             if self.render_fn is not None:
-                frame = self.render_fn(self.world)
+                try:
+                    frame = self.render_fn(self.world, self.metrics.summary())
+                except TypeError:
+                    frame = self.render_fn(self.world)
                 if frame:
                     print(frame)
 

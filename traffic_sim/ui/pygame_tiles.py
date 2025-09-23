@@ -1,86 +1,134 @@
+"""Tile-based Pygame renderer for the grid world variant."""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Dict, List, Tuple
+
 import pygame
-from dataclasses import dataclass
-from typing import Tuple, Dict, List
-from .sprites import load_cars_manifest
+
+from .sprite_loader import DEFAULT_CAR_NAMES, load_cars_manifest
+from .tilecodes import Tile, TILES
 
 TILE_PX = 32
-PX_PER_M = 4
-BG = (74, 86, 57)
+FRAME_RATE = 30
+BG_COLOR = (74, 86, 57)
 
-@dataclass(frozen=True)
-class Tile:
-    col: int
-    row: int
 
 class TileAtlas:
-    ...
-    # (keep as you already have)
+    """Slices a tile atlas PNG into individual cell surfaces."""
+
+    def __init__(self, sheet_path: str | Path, tile_px: int = TILE_PX) -> None:
+        if not pygame.get_init():  # ensure pygame is ready for image loading
+            pygame.init()
+        self.tile_px = tile_px
+        path = Path(sheet_path)
+        self.sheet = pygame.image.load(str(path)).convert_alpha()
+        self._cache: Dict[Tuple[int, int], pygame.Surface] = {}
+
+    def get(self, tile: Tile) -> pygame.Surface:
+        key = (tile.col, tile.row)
+        if key not in self._cache:
+            x = tile.col * self.tile_px
+            y = tile.row * self.tile_px
+            rect = pygame.Rect(x, y, self.tile_px, self.tile_px)
+            surf = pygame.Surface((self.tile_px, self.tile_px), pygame.SRCALPHA)
+            surf.blit(self.sheet, (0, 0), rect)
+            self._cache[key] = surf
+        return self._cache[key]
+
 
 class PygameTilesRenderer:
-    def __init__(self, world, grid: List[List[str]], tilemap: Dict[str, Tile],
-                 sheet_path: str = "assets/tiles/roads_2w.png", title="Traffic Sim"):
+    """Render the grid world using a tile atlas and vehicle sprites."""
+
+    def __init__(
+        self,
+        world,
+        grid: List[List[str]],
+        tilemap: Dict[str, Tile] | None = None,
+        sheet_path: str | Path = "assets/sprites/roads_2w.png",
+        title: str = "Traffic Sim",
+    ) -> None:
         pygame.init()
         self.world = world
         self.grid = grid
-        self.tilemap = tilemap
-        self.atlas = TileAtlas(sheet_path)
-        h, w = len(grid), len(grid[0])
-        self.screen = pygame.display.set_mode((w * TILE_PX, h * TILE_PX))
+        self.tilemap = tilemap or TILES
+        rows = len(grid)
+        cols = len(grid[0]) if grid else 0
+        self.screen = pygame.display.set_mode((cols * TILE_PX, rows * TILE_PX))
         pygame.display.set_caption(title)
         self.clock = pygame.time.Clock()
         self.running = True
-        self.cache: Dict[Tuple[int,int], pygame.Surface] = {}
 
-        # NEW: load car sprites (adjust cell size if your sheet differs)
+        self.atlas = TileAtlas(sheet_path, tile_px=TILE_PX)
+
         self.car_sprites = load_cars_manifest(
             "assets/sprites/cars.png",
-            cell_w=256, cell_h=256,      # <— tweak if needed
-            grid_cols=4, grid_rows=3,    # <— tweak if needed
-            names=[
-                "police","taxi","sports_blue","van",
-                "sports_yellow","ambulance","sedan_red","motor_blue",
-                "motor_red"
-            ]
+            names=DEFAULT_CAR_NAMES,
         )
-        # Pre-scale car sprites to lane-ish width
-        self.pre_scaled: Dict[str, pygame.Surface] = {}
-        self._prepare_scaled()
+        self.scaled_cars: Dict[str, pygame.Surface] = {}
+        self._prepare_scaled_sprites()
 
-    def _prepare_scaled(self):
-        # fit ~12 px cross-section for a single-lane vibe
+    def _prepare_scaled_sprites(self) -> None:
         target_w_ns, target_h_ns = 12, 22
         target_w_ew, target_h_ew = 22, 12
         for name, surf in self.car_sprites.items():
-            # north-south base (upright)
             ns = pygame.transform.smoothscale(surf, (target_w_ns, target_h_ns))
             ew = pygame.transform.smoothscale(surf, (target_w_ew, target_h_ew))
-            # store both orientations
-            self.pre_scaled[name + ":NS"] = ns
-            self.pre_scaled[name + ":EW"] = pygame.transform.rotate(ew, 90)
+            self.scaled_cars[f"{name}:NS"] = ns
+            self.scaled_cars[f"{name}:EW"] = pygame.transform.rotate(ew, 90)
 
-    ...
-    # draw_grid stays the same
+    def _handle_events(self) -> None:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+            elif event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_q):
+                self.running = False
 
-    def draw_cars(self):
-        for v in self.world.vehicles:
-            if v.finished: 
+    def _draw_grid(self) -> None:
+        for r, row in enumerate(self.grid):
+            for c, code in enumerate(row):
+                tile = self.tilemap.get(code)
+                if tile is None:
+                    continue
+                tile_surface = self.atlas.get(tile)
+                self.screen.blit(tile_surface, (c * TILE_PX, r * TILE_PX))
+
+    def _draw_cars(self) -> None:
+        for vehicle in self.world.vehicles:
+            if vehicle.finished:
                 continue
-            path = getattr(v.road, "screen_points", None)
+            path = getattr(vehicle.road, "screen_points", None)
             if not path:
                 continue
-            (x0,y0), (x1,y1) = path[0], path[-1]
-            s = max(0.0, min(1.0, v.pos_m / max(1e-6, v.road.length_m)))
-            x = x0 + (x1 - x0) * s
-            y = y0 + (y1 - y0) * s
+            (x0, y0), (x1, y1) = path[0], path[-1]
+            progress = max(0.0, min(1.0, vehicle.pos_m / max(1e-6, vehicle.road.length_m)))
+            x = x0 + (x1 - x0) * progress
+            y = y0 + (y1 - y0) * progress
 
-            sprite_name = v.sprite_key or v.kind
-            orient = "NS" if v.road.approach_dir in ("NS","SN") else "EW"
+            sprite_name = vehicle.sprite_key or vehicle.kind or "sedan_red"
+            orient = "NS" if vehicle.road.approach_dir in {"NS", "SN"} else "EW"
             key = f"{sprite_name}:{orient}"
-            img = self.pre_scaled.get(key)
-            if img is None:
-                # fallback: any sprite
-                img = next(iter(self.pre_scaled.values()))
-            rect = img.get_rect(center=(int(x), int(y)))
-            self.screen.blit(img, rect)
+            sprite = self.scaled_cars.get(key)
+            if sprite is None and self.scaled_cars:
+                sprite = next(iter(self.scaled_cars.values()))
+            if sprite is None:
+                continue
+            rect = sprite.get_rect(center=(int(x), int(y)))
+            self.screen.blit(sprite, rect)
 
-    ...
+    def render_frame(self) -> None:
+        if not self.running:
+            return
+        self._handle_events()
+        self.screen.fill(BG_COLOR)
+        self._draw_grid()
+        self._draw_cars()
+        pygame.display.flip()
+        self.clock.tick(FRAME_RATE)
+
+    def close(self) -> None:
+        pygame.quit()
+
+    def __del__(self) -> None:  # pragma: no cover - best-effort cleanup
+        if pygame.get_init():
+            pygame.quit()
